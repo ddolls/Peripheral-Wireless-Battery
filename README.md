@@ -60,6 +60,19 @@ The compiled binary `Peripheral-Wireless-Battery.exe` will be generated in the r
 
 ---
 
+## Credits & Acknowledgments
+
+This project is built upon the foundation of [Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor) by [krisgfx9](https://github.com/krisgfx9), licensed under GPL-3.0.
+
+Customized, maintained, and extended by **[ddolls](https://github.com/ddolls)** with:
+- Windows 11 Taskbar placement modes (*Far Right Edge, Left of Tray, Next to Clock, Center, Next to Running Apps, Far Left Edge*)
+- Pixel nudge shortcuts and custom X/Y positioning dialog
+- Dedicated hardware driver & battery decoding for **Leobog Hi75C Pro** (2.4 GHz & wired USB-C)
+- Dedicated hardware driver & battery decoding for **Vortex Series Oni R1** (2.4 GHz & wired USB-C)
+- Visual styling enhancements (pure white charging bolt, non-dimmed charging indicators, clean history viewer)
+
+---
+
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
