@@ -1,0 +1,11 @@
+build/
+wireless-battery
+*.exe
+*.o
+*.obj
+*.res
+*.log
+dist/
+third_party/
+.claude/
+CLAUDE.md
