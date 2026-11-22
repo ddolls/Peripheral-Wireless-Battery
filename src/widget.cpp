@@ -465,11 +465,13 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         bool mark = it.charging || it.full;  // bolt while charging, green check mark once full
         size_t glyph = out.size();
         slots.push_back({ (int)glyph, (int)glyph + 1, mark ? (int)glyph + 2 : -1 });
-        bool branded = (it.accent != Accent::None) || it.hasCustomColor;
-        BrandColor bc = it.hasCustomColor ? it.customColor : AccentColor(it.accent, g_light);
+        bool hasCustom = it.hasCustomColor;
+        bool branded = (it.accent != Accent::None);
+        BrandColor bc = hasCustom ? it.customColor : AccentColor(it.accent, g_light);
         Rgb accent{ bc.r, bc.g, bc.b };
-        Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons, g_light), branded ? accent : fg, a, Px(5) };
-        if (branded && !it.dim) {
+        Rgb iconColor = (hasCustom || branded) ? accent : fg;
+        Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons, g_light), iconColor, a, Px(5) };
+        if (branded && !hasCustom && !it.dim) {
             icon.haloR = Px(3);
             icon.halo = Halo(icon.m, icon.haloR);
             icon.haloAlpha = g_light ? 60 : 140;
@@ -477,7 +479,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         out.push_back(std::move(icon));
         std::wstring t = !it.text.empty() ? it.text : it.percent >= 0 ? std::to_wstring(it.percent) + L"%" : L"?";
         Piece label{ RenderMask(t, text, g_light), tc, a, mark ? Px(2) : 0 };
-        if (branded && it.percent >= 0) {
+        if (branded && !hasCustom && it.percent >= 0) {
             label.barPct = it.percent;
             label.barColor = it.low ? red : accent;
         }
