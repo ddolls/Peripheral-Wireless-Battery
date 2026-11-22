@@ -19,6 +19,10 @@ A clean, native Windows 11 taskbar battery monitor and widget for wireless and w
   - *Center Taskbar*
   - *Next to Running App Icons*
   - *Far Left Edge*
+- **Flexible Text Layout & Styling:**
+  - **Text Placement:** Position percentage text to the *Right of icon (Default)*, *Left of icon*, or *Below icon (Vertical stack)*.
+  - **Custom Font Size:** Pick from presets (10px, 11px, 13px, 15px, 17px, 20px) or set custom font pixel sizes.
+  - **Per-Device Custom Colors:** Tint any connected peripheral icon with quick presets or the native Windows Color Picker (clean, glow-free tinting).
 - **Precision Nudge & Custom Offset:** Fine-tune widget placement with $\pm 1\text{px}$, $\pm 5\text{px}$, $\pm 20\text{px}$ shortcuts or define custom X / Y coordinates.
 - **Dedicated Device Support:**
   - **Leobog Hi75C Pro:** 2.4 GHz wireless receiver & USB-C wired charging mode.
