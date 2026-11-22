@@ -465,8 +465,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         bool mark = it.charging || it.full;  // bolt while charging, green check mark once full
         size_t glyph = out.size();
         slots.push_back({ (int)glyph, (int)glyph + 1, mark ? (int)glyph + 2 : -1 });
-        bool branded = it.accent != Accent::None;
-        BrandColor bc = AccentColor(it.accent, g_light);
+        bool branded = (it.accent != Accent::None) || it.hasCustomColor;
+        BrandColor bc = it.hasCustomColor ? it.customColor : AccentColor(it.accent, g_light);
         Rgb accent{ bc.r, bc.g, bc.b };
         Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons, g_light), branded ? accent : fg, a, Px(5) };
         if (branded && !it.dim) {

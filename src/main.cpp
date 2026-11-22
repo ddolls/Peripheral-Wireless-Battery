@@ -4,6 +4,7 @@
 #include <dbt.h>
 #include <initguid.h>
 #include <hidclass.h>
+#include <commdlg.h>
 
 #include <algorithm>
 #include <atomic>
@@ -67,7 +68,10 @@ enum MenuId : UINT {
 };
 enum DeviceCmd : UINT {
     DEV_TOGGLE, DEV_LEFT, DEV_RIGHT, DEV_RENAME, DEV_RESET_NAME, DEV_HISTORY,
-    DEV_ALERT_FIRST = 6, DEV_ALERT_DEFAULT = DEV_ALERT_FIRST + 8, DEV_ALERT_OFF, DEV_STRIDE = 16
+    DEV_ALERT_FIRST = 6, DEV_ALERT_DEFAULT = DEV_ALERT_FIRST + 8, DEV_ALERT_OFF,
+    DEV_COLOR_PICKER = 16, DEV_COLOR_RESET,
+    DEV_COLOR_PRESET_FIRST = 18,
+    DEV_STRIDE = 32
 };
 
 const wchar_t* kAppName = L"Peripheral Wireless Battery";
@@ -270,6 +274,86 @@ void SaveAlertThresholds() {
                     multi.data(), (DWORD)(multi.size() * sizeof(wchar_t)));
 }
 
+// Per-device custom colors
+std::map<std::wstring, COLORREF> g_deviceColors;
+COLORREF g_customColorPalette[16] = {
+    RGB(0, 210, 255),  RGB(68, 214, 44),  RGB(160, 100, 255), RGB(255, 46, 77),
+    RGB(255, 102, 0),  RGB(250, 220, 20), RGB(255, 92, 160), RGB(255, 255, 255),
+    RGB(0, 0, 0),      RGB(128, 128, 128),RGB(192, 192, 192),RGB(0, 120, 215),
+    RGB(0, 153, 188),  RGB(16, 124, 16),  RGB(180, 0, 158),   RGB(232, 17, 35)
+};
+
+struct ColorPreset {
+    const wchar_t* name;
+    COLORREF color;
+};
+
+const ColorPreset kColorPresets[] = {
+    { L"Cyan / Sky Blue",      RGB(0, 210, 255) },
+    { L"Green (Razer)",        RGB(68, 214, 44) },
+    { L"Purple / Violet",      RGB(160, 100, 255) },
+    { L"Red (ROG)",            RGB(255, 46, 77) },
+    { L"Orange (SteelSeries)", RGB(255, 102, 0) },
+    { L"Yellow (Corsair)",     RGB(250, 220, 20) },
+    { L"Pink / Magenta",       RGB(255, 92, 160) },
+    { L"White",                RGB(255, 255, 255) },
+};
+
+void LoadDeviceColors() {
+    g_deviceColors.clear();
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceColors", RRF_RT_REG_MULTI_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS ||
+        size < 2 * sizeof(wchar_t) || size > 128 * 1024) return;
+    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 2, 0);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceColors", RRF_RT_REG_MULTI_SZ, nullptr, buf.data(), &size) != ERROR_SUCCESS)
+        return;
+    size_t limit = size / sizeof(wchar_t);
+    for (size_t i = 0; i < limit && buf[i];) {
+        size_t end = i;
+        while (end < limit && buf[end]) ++end;
+        if (end == limit) break;
+        std::wstring item(buf.data() + i, end - i);
+        size_t sep = item.rfind(L'\t');
+        if (sep != std::wstring::npos && sep != 0) {
+            std::wstring key = item.substr(0, sep);
+            std::wstring val = item.substr(sep + 1);
+            wchar_t* tail = nullptr;
+            unsigned long c = std::wcstoul(val.c_str(), &tail, 0);
+            if (tail != val.c_str() && *tail == 0) {
+                g_deviceColors[key] = (COLORREF)c;
+            }
+        }
+        i = end + 1;
+    }
+}
+
+void SaveDeviceColors() {
+    std::wstring multi;
+    for (const auto& [key, color] : g_deviceColors) {
+        wchar_t buf[32];
+        swprintf_s(buf, L"0x%06X", (unsigned int)color);
+        multi += key + L"\t" + buf;
+        multi.push_back(L'\0');
+    }
+    multi.push_back(L'\0');
+    if (multi.size() == 1) multi.push_back(L'\0');
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceColors", REG_MULTI_SZ,
+                    multi.data(), (DWORD)(multi.size() * sizeof(wchar_t)));
+}
+
+bool PickColor(HWND owner, COLORREF initial, COLORREF& outColor) {
+    CHOOSECOLORW cc{ sizeof(cc) };
+    cc.hwndOwner = owner;
+    cc.lpCustColors = g_customColorPalette;
+    cc.rgbResult = initial;
+    cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+    if (ChooseColorW(&cc)) {
+        outColor = cc.rgbResult;
+        return true;
+    }
+    return false;
+}
+
 bool LoadWidgetMode() { return LoadBoolSetting(L"TaskbarWidget", true); }
 void SaveWidgetMode(bool on) { SaveBoolSetting(L"TaskbarWidget", on); }
 bool LoadHideLastKnown() { return LoadBoolSetting(L"HideLastKnownDevices", false); }
@@ -433,13 +517,14 @@ Rgb Foreground() { return g_lightTaskbar ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 }
 
 Accent AccentFor(const DeviceStatus& s) { return g_brandColors ? BrandOf(s) : Accent::None; }
 
-HICON IconFor(int pct, bool charging, bool dim, Accent accent) {
+HICON IconFor(int pct, bool charging, bool dim, Accent accent, bool hasCustom = false, BrandColor customColor = {}) {
     Rgb fg = Foreground();
-    BrandColor bc = AccentColor(accent, g_lightTaskbar);
+    BrandColor bc = hasCustom ? customColor : AccentColor(accent, g_lightTaskbar);
+    bool branded = hasCustom || (accent != Accent::None);
     Rgb bar = charging        ? Rgb{ 0, 170, 255 }
             : pct <= LOW_BATTERY ? Rgb{ 232, 32, 48 }
             : pct <= 30       ? Rgb{ 255, 150, 0 }
-            : accent != Accent::None ? Rgb{ bc.r, bc.g, bc.b }
+            : branded         ? Rgb{ bc.r, bc.g, bc.b }
                               : Rgb{ 30, 190, 90 };
     Rgb text = (!charging && pct >= 0 && pct <= LOW_BATTERY) ? Rgb{ 240, 50, 60 } : fg;
     std::wstring t = pct < 0 ? L"?" : std::to_wstring(pct);
@@ -544,11 +629,16 @@ void ApplyEntry(TrayEntry& e) {
     // Fully charged on power: the normal green bar instead of the blue charging one.
     bool charging = s.connected && !s.asleep && s.charging && !s.full && shown < 100;
     Accent accent = AccentFor(s);
+    auto colIt = g_deviceColors.find(s.key);
+    bool hasCustom = colIt != g_deviceColors.end();
+    COLORREF custColor = hasCustom ? colIt->second : 0;
+    BrandColor bc = hasCustom ? BrandColor{ (BYTE)GetRValue(custColor), (BYTE)GetGValue(custColor), (BYTE)GetBValue(custColor) } : BrandColor{};
     std::wstring sig = std::to_wstring(shown) + (charging ? L"c" : L"") + (dim ? L"d" : L"") + (g_lightTaskbar ? L"l" : L"k") +
-                       L"a" + std::to_wstring((int)accent) + (s.connected ? L"|on" : L"|off");
+                       L"a" + std::to_wstring((int)accent) + (s.connected ? L"|on" : L"|off") +
+                       (hasCustom ? (L"|cc" + std::to_wstring(custColor)) : L"");
     if (sig != e.iconSig || !e.icon) {
         if (e.icon) DestroyIcon(e.icon);
-        e.icon = s.connected ? IconFor(shown, charging, dim, accent)
+        e.icon = s.connected ? IconFor(shown, charging, dim, accent, hasCustom, bc)
                              : RenderIcon(L"\u00D7", -1, Foreground(), Foreground(), true);
         e.iconSig = sig;
     }
@@ -615,6 +705,12 @@ void UpdateWidget() {
         it.bluetooth = e->st.via == L"Bluetooth";
         it.label = labels[items.size()];
         it.accent = AccentFor(e->st);
+        auto colIt = g_deviceColors.find(e->st.key);
+        if (colIt != g_deviceColors.end()) {
+            it.hasCustomColor = true;
+            COLORREF c = colIt->second;
+            it.customColor = BrandColor{ (BYTE)GetRValue(c), (BYTE)GetGValue(c), (BYTE)GetBValue(c) };
+        }
         items.push_back(it);
         if (!tip.empty()) tip += L"\n";
         tip += DisplayName(*e) + L": " + StatusText(*e);
@@ -805,6 +901,35 @@ void ResetDeviceName(const std::wstring& key) {
     UpdateWidget();
 }
 
+void PromptDeviceColor(const std::wstring& key) {
+    auto it = g_entries.find(key);
+    if (it == g_entries.end()) return;
+    COLORREF initial = g_deviceColors.count(key) ? g_deviceColors[key] : RGB(0, 210, 255);
+    COLORREF chosen = 0;
+    if (!PickColor(g_hwnd, initial, chosen)) return;
+    g_deviceColors[key] = chosen;
+    SaveDeviceColors();
+    it = g_entries.find(key);
+    if (it != g_entries.end()) ApplyEntry(it->second);
+    UpdateWidget();
+}
+
+void SetDevicePresetColor(const std::wstring& key, COLORREF color) {
+    g_deviceColors[key] = color;
+    SaveDeviceColors();
+    auto it = g_entries.find(key);
+    if (it != g_entries.end()) ApplyEntry(it->second);
+    UpdateWidget();
+}
+
+void ResetDeviceColor(const std::wstring& key) {
+    if (!g_deviceColors.erase(key)) return;
+    SaveDeviceColors();
+    auto it = g_entries.find(key);
+    if (it != g_entries.end()) ApplyEntry(it->second);
+    UpdateWidget();
+}
+
 void SetAlertOverride(const std::wstring& key, int threshold) {
     if (threshold == alerts::kUseDefault) g_alertOverrides.erase(key);
     else if (alerts::ValidOverride(threshold)) g_alertOverrides[key] = threshold;
@@ -856,6 +981,26 @@ void ShowMenu() {
         AppendMenuW(sub, MF_STRING, base + DEV_RENAME, T(L"Rename device..."));
         AppendMenuW(sub, MF_STRING | (g_aliases.count(k) ? 0 : MF_GRAYED),
                     base + DEV_RESET_NAME, T(L"Reset to original name"));
+
+        HMENU colorMenu = CreatePopupMenu();
+        bool hasCustom = g_deviceColors.count(k) > 0;
+        COLORREF currentColor = hasCustom ? g_deviceColors[k] : 0;
+        bool matchedPreset = false;
+        for (size_t i = 0; i < ARRAYSIZE(kColorPresets); ++i) {
+            bool isThis = hasCustom && (currentColor == kColorPresets[i].color);
+            if (isThis) matchedPreset = true;
+            AppendMenuW(colorMenu, MF_STRING | (isThis ? MF_CHECKED : 0),
+                        base + DEV_COLOR_PRESET_FIRST + (UINT)i, kColorPresets[i].name);
+        }
+        AppendMenuW(colorMenu, MF_SEPARATOR, 0, nullptr);
+        bool isCustomNonPreset = hasCustom && !matchedPreset;
+        AppendMenuW(colorMenu, MF_STRING | (isCustomNonPreset ? MF_CHECKED : 0),
+                    base + DEV_COLOR_PICKER, T(L"Custom color (Color picker)..."));
+        AppendMenuW(colorMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(colorMenu, MF_STRING | (!hasCustom ? MF_CHECKED : 0),
+                    base + DEV_COLOR_RESET, T(L"Reset to default"));
+        AppendMenuW(sub, MF_POPUP, (UINT_PTR)colorMenu, T(L"Color"));
+
         HMENU alertMenu = CreatePopupMenu();
         int selectedThreshold = alerts::OverrideFor(g_alertOverrides, k);
         AppendMenuW(alertMenu, MF_STRING | (selectedThreshold == alerts::kUseDefault ? MF_CHECKED : 0),
@@ -1045,12 +1190,15 @@ void ShowMenu() {
                 SetWidgetMonitor(monitors[cmd - ID_MONITOR_FIRST].id);
             } else if (cmd >= ID_DEVICE_FIRST && cmd < ID_DEVICE_FIRST + keys.size() * DEV_STRIDE) {
                 std::wstring key = keys[(cmd - ID_DEVICE_FIRST) / DEV_STRIDE];
-                switch ((cmd - ID_DEVICE_FIRST) % DEV_STRIDE) {
+                UINT slot = (cmd - ID_DEVICE_FIRST) % DEV_STRIDE;
+                switch (slot) {
                     case DEV_TOGGLE: ToggleHidden(key); break;
                     case DEV_LEFT:   MoveEntry(key, -1); break;
                     case DEV_RIGHT:  MoveEntry(key, +1); break;
                     case DEV_RENAME: RenameDevice(key); break;
                     case DEV_RESET_NAME: ResetDeviceName(key); break;
+                    case DEV_COLOR_PICKER: PromptDeviceColor(key); break;
+                    case DEV_COLOR_RESET:  ResetDeviceColor(key); break;
                     case DEV_ALERT_DEFAULT: SetAlertOverride(key, alerts::kUseDefault); break;
                     case DEV_ALERT_OFF: SetAlertOverride(key, alerts::kDisabled); break;
                     case DEV_HISTORY: {
@@ -1060,9 +1208,11 @@ void ShowMenu() {
                         break;
                     }
                     default: {
-                        UINT slot = (cmd - ID_DEVICE_FIRST) % DEV_STRIDE;
-                        if (slot >= DEV_ALERT_FIRST && slot < DEV_ALERT_FIRST + alerts::kThresholdCount)
+                        if (slot >= DEV_ALERT_FIRST && slot < DEV_ALERT_FIRST + alerts::kThresholdCount) {
                             SetAlertOverride(key, alerts::kThresholds[slot - DEV_ALERT_FIRST]);
+                        } else if (slot >= DEV_COLOR_PRESET_FIRST && slot < DEV_COLOR_PRESET_FIRST + ARRAYSIZE(kColorPresets)) {
+                            SetDevicePresetColor(key, kColorPresets[slot - DEV_COLOR_PRESET_FIRST].color);
+                        }
                         break;
                     }
                 }
@@ -1382,6 +1532,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     LoadHidden();
     LoadOrder();
     LoadAliases();
+    LoadDeviceColors();
     LoadAlertThresholds();
     battery_history::Initialize(g_demo);
     Reconcile();
