@@ -4,7 +4,7 @@
 ; Build with installer\build-installer.ps1 (or: ISCC /DAppVersion=1.2.3 installer\BatteryHub.iss).
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 #define Root ".."
 

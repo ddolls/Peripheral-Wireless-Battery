@@ -1384,15 +1384,17 @@ void ShowMenu() {
         case ID_FONT_SIZE_RESET: ApplyPercentFontSize(13); break;
         case ID_VERSION: {
             const wchar_t* versionInfo =
-                L"Peripheral Wireless Battery v1.0\n\n"
-                L"Changelog:\n"
-                L"- Custom device naming: Leobog Hi75C Pro & Vortex Series Oni R1\n"
-                L"- Dual connection support: Wired USB-C and 2.4 GHz Wireless\n"
-                L"- Windows 11 Taskbar positioning (Far Right, Left of Tray, Clock, Center, Next to Apps, Left Edge)\n"
-                L"- Fine-grained Nudge (+/-1px, +/-5px, +/-20px) and Custom X/Y Offset\n"
-                L"- Interactive desktop session auto-attach and smart single-instance handling\n"
+                L"Peripheral Wireless Battery v1.1.0\n\n"
+                L"Changelog v1.1.0:\n"
+                L"- Percentage Text Placement (Right of icon, Left of icon, Below icon)\n"
+                L"- Percentage Font Size Customizer (Presets 10-20px & custom pixel dialog)\n"
+                L"- Per-Device Custom Colors with native Windows Color Picker (clean tinting)\n"
+                L"- Fixed Windows startup context menu auto-popup\n"
+                L"- Dedicated hardware support: Leobog Hi75C Pro & Vortex Series Oni R1\n"
+                L"- Dual connection mode support: Wired USB-C and 2.4 GHz Wireless\n"
+                L"- Taskbar positioning: 6 preset positions & precision nudge (+/-1px, 5px, 20px)\n"
                 L"- Native light and dark theme taskbar support";
-            MessageBoxW(g_hwnd, versionInfo, L"Version 1.0", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(g_hwnd, versionInfo, L"Version 1.1.0", MB_OK | MB_ICONINFORMATION);
             break;
         }
         case ID_BUY_COFFEE:

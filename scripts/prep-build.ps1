@@ -6,7 +6,7 @@ if (-not (Test-Path $buildDir)) {
     New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 }
 
-& (Join-Path $root "scripts\generate-version.ps1") -Version "1.0.0" -Channel "dev"
+& (Join-Path $root "scripts\generate-version.ps1") -Version "1.1.0" -Channel "dev"
 
 $langFiles = Get-ChildItem -Path (Join-Path $root "lang\*.txt")
 $outLines = [System.Collections.Generic.List[string]]::new()

@@ -49,6 +49,18 @@ A clean, native Windows 11 taskbar battery monitor and widget for wireless and w
 
 ---
 
+## Changelog
+
+### v1.1.0
+- **Percentage Text Placement:** Added options to place percentage text to the *Right of icon (Default)*, *Left of icon*, or *Below icon (Vertical stack)*.
+- **Custom Percentage Font Size:** Preset sizes (10px, 11px, 13px, 15px, 17px, 20px) and custom pixel input dialog.
+- **Per-Device Custom Colors:** Added per-peripheral custom color presets and full Windows Color Picker support (clean icon tinting without glow or thin level bars).
+- **Startup Reliability:** Fixed context menu auto-appearing on Windows boot / login.
+- **Dedicated Hardware Support:** Support for **Leobog Hi75C Pro** and **Vortex Series Oni R1** in both 2.4 GHz wireless and USB-C wired charging modes.
+- **Taskbar Positioning & Nudge:** 6 preset taskbar positions and precision nudge offsets ($\pm 1\text{px}$, $\pm 5\text{px}$, $\pm 20\text{px}$) + custom offset dialog.
+
+---
+
 ## Build from Source
 
 ### Prerequisites
