@@ -309,21 +309,25 @@ void SavePollSeconds(DWORD seconds) {
 }
 
 bool AutostartEnabled() {
-    wchar_t buf[MAX_PATH * 2];
+    wchar_t buf[MAX_PATH * 2] = {};
     DWORD sz = sizeof(buf);
     if (RegGetValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return false;
-    return _wcsicmp(buf, (L"\"" + ExePath() + L"\"").c_str()) == 0;
+    return wcsstr(buf, ExePath().c_str()) != nullptr;
 }
 
 void SetAutostart(bool on) {
     HKEY k;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
     if (on) {
-        std::wstring v = L"\"" + ExePath() + L"\"";
+        std::wstring v = L"\"" + ExePath() + L"\" --autostart";
         RegSetValueExW(k, kRunValue, 0, REG_SZ, (const BYTE*)v.c_str(), (DWORD)((v.size() + 1) * sizeof(wchar_t)));
     } else {
         RegDeleteValueW(k, kRunValue);
     }
+    // Clean up legacy keys
+    RegDeleteValueW(k, L"WirelessBattery");
+    RegDeleteValueW(k, L"BatteryHub");
+    RegDeleteValueW(k, L"Wireless-Device-Battery-Monitor");
     RegCloseKey(k);
 }
 
@@ -1144,6 +1148,12 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     switch (msg) {
+        case WM_COMMAND:
+            if (LOWORD(wp) == ID_REFRESH) {
+                SetEvent(g_refreshEvt);
+                return 0;
+            }
+            break;
         case WM_RESULTS: {
             auto* v = reinterpret_cast<std::vector<DeviceStatus>*>(lp);
             OnResults(*v);
@@ -1320,9 +1330,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
         HWND existingWnd = FindWindowW(L"PeripheralWirelessBatteryWnd", nullptr);
         if (existingWnd) {
             PostMessageW(existingWnd, WM_COMMAND, ID_REFRESH, 0);
-            PostMessageW(existingWnd, WM_WIDGET_CLICK, 0, 0);
+            if (cmdLine && (wcsstr(cmdLine, L"--menu") || wcsstr(cmdLine, L"-m"))) {
+                PostMessageW(existingWnd, WM_WIDGET_CLICK, 0, 0);
+            }
         }
         return 0;
+    }
+
+    // Clean up legacy autostart entries
+    HKEY kRun;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &kRun) == ERROR_SUCCESS) {
+        RegDeleteValueW(kRun, L"WirelessBattery");
+        RegDeleteValueW(kRun, L"BatteryHub");
+        RegDeleteValueW(kRun, L"Wireless-Device-Battery-Monitor");
+        RegCloseKey(kRun);
     }
 
     g_lightTaskbar = ReadLightTaskbar();
