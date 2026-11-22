@@ -61,6 +61,9 @@ enum MenuId : UINT {
     ID_POS_NEXT_TO_APPS, ID_POS_CENTER, ID_POS_NUDGE_L1, ID_POS_NUDGE_R1,
     ID_POS_NUDGE_L5, ID_POS_NUDGE_R5, ID_POS_NUDGE_L20, ID_POS_NUDGE_R20,
     ID_POS_CUSTOM_OFFSET, ID_POS_RESET_OFFSET,
+    ID_PLACE_RIGHT = 700, ID_PLACE_LEFT, ID_PLACE_BELOW,
+    ID_FONT_SIZE_10 = 710, ID_FONT_SIZE_11, ID_FONT_SIZE_13, ID_FONT_SIZE_15, ID_FONT_SIZE_17, ID_FONT_SIZE_20,
+    ID_FONT_SIZE_CUSTOM, ID_FONT_SIZE_RESET,
     ID_VERSION = 200, ID_BUY_COFFEE,
     ID_LANG_AUTO = 400, ID_LANG_ADD, ID_LANG_FIRST,  // "Language": ID_LANG_FIRST + 0..63
     ID_MONITOR_ALL = 300, ID_MONITOR_MAIN, ID_MONITOR_FIRST,  // "Show the widget on": ID_MONITOR_FIRST + 0..31
@@ -381,6 +384,169 @@ void SetWidgetMonitor(const std::wstring& v) {
 }
 bool LoadStacked() { return LoadBoolSetting(L"StackedLayout", false); }
 void SaveStacked(bool on) { SaveBoolSetting(L"StackedLayout", on); }
+
+int LoadPercentFontSize() {
+    DWORD v = 13;
+    DWORD sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"PercentFontSize", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS) {
+        if (v >= 8 && v <= 36) return (int)v;
+    }
+    return 13;
+}
+
+void SavePercentFontSize(int size) {
+    DWORD v = (DWORD)size;
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"PercentFontSize", REG_DWORD, &v, sizeof(v));
+}
+
+int LoadTextPlacement() {
+    DWORD v = 0;
+    DWORD sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"TextPlacement", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS) {
+        if (v <= 2) return (int)v;
+    }
+    if (LoadBoolSetting(L"StackedLayout", false)) return 2;
+    return 0;
+}
+
+void SaveTextPlacement(int placement) {
+    DWORD v = (DWORD)placement;
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TextPlacement", REG_DWORD, &v, sizeof(v));
+    SaveBoolSetting(L"StackedLayout", placement == 2);
+}
+
+void ApplyTextPlacement(widget::TextPlacement placement) {
+    SaveTextPlacement(static_cast<int>(placement));
+    widget::SetTextPlacement(placement);
+}
+
+void ApplyPercentFontSize(int size) {
+    SavePercentFontSize(size);
+    widget::SetPercentFontSize(size);
+}
+
+static bool PromptFontSize(HWND owner, int currentSize, int& outSize) {
+    struct State {
+        int size;
+        bool ok = false;
+        HWND edit = nullptr;
+    } state{ currentSize };
+
+    const wchar_t kClass[] = L"PeripheralBatteryFontSizeDlg";
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{ sizeof(wc) };
+        wc.lpfnWndProc = [](HWND h, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+            if (msg == WM_NCCREATE) {
+                SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+                return TRUE;
+            }
+            auto* s = (State*)GetWindowLongPtrW(h, GWLP_USERDATA);
+            if (!s) return DefWindowProcW(h, msg, wp, lp);
+            switch (msg) {
+                case WM_CREATE: {
+                    const int dpi = GetDpiForWindow(h);
+                    auto scale = [dpi](int v) { return MulDiv(v, dpi ? dpi : 96, 96); };
+                    HWND lbl = CreateWindowExW(0, L"STATIC", L"Percentage font size (8 - 36 px):",
+                                               WS_CHILD | WS_VISIBLE, scale(20), scale(15), scale(240), scale(20),
+                                               h, nullptr, GetModuleHandleW(nullptr), nullptr);
+                    s->edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", std::to_wstring(s->size).c_str(),
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_AUTOHSCROLL,
+                                              scale(20), scale(38), scale(240), scale(24),
+                                              h, (HMENU)101, GetModuleHandleW(nullptr), nullptr);
+                    HWND ok = CreateWindowExW(0, L"BUTTON", L"OK",
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                                              scale(70), scale(75), scale(85), scale(26),
+                                              h, (HMENU)IDOK, GetModuleHandleW(nullptr), nullptr);
+                    HWND cancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
+                                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                                                  scale(165), scale(75), scale(85), scale(26),
+                                                  h, (HMENU)IDCANCEL, GetModuleHandleW(nullptr), nullptr);
+                    SendMessageW(lbl, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+                    SendMessageW(s->edit, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+                    SendMessageW(ok, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+                    SendMessageW(cancel, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+                    SetFocus(s->edit);
+                    SendMessageW(s->edit, EM_SETSEL, 0, -1);
+                    return 0;
+                }
+                case WM_COMMAND: {
+                    if (LOWORD(wp) == IDOK) {
+                        wchar_t buf[32] = {};
+                        GetWindowTextW(s->edit, buf, 31);
+                        int val = _wtoi(buf);
+                        if (val >= 8 && val <= 36) {
+                            s->size = val;
+                            s->ok = true;
+                            DestroyWindow(h);
+                        } else {
+                            MessageBoxW(h, L"Please enter a size between 8 and 36 pixels.", L"Invalid Size", MB_OK | MB_ICONWARNING);
+                        }
+                        return 0;
+                    }
+                    if (LOWORD(wp) == IDCANCEL) {
+                        DestroyWindow(h);
+                        return 0;
+                    }
+                    break;
+                }
+                case WM_CLOSE:
+                    DestroyWindow(h);
+                    return 0;
+            }
+            return DefWindowProcW(h, msg, wp, lp);
+        };
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kClass;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+
+    const int dpi = GetDpiForSystem();
+    auto scale = [dpi](int v) { return MulDiv(v, dpi ? dpi : 96, 96); };
+    int width = scale(295), height = scale(150);
+
+    POINT pt{};
+    GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{ sizeof(mi) };
+    RECT area{};
+    if (GetMonitorInfoW(mon, &mi)) area = mi.rcWork;
+    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &area, 0);
+    int x = area.left + ((area.right - area.left - width) / 2);
+    int y = area.top + ((area.bottom - area.top - height) / 2);
+
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW, kClass,
+                               L"Percentage Font Size", WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                               x, y, width, height, owner, nullptr, GetModuleHandleW(nullptr), &state);
+    if (!dlg) return false;
+
+    if (owner && IsWindowEnabled(owner)) EnableWindow(owner, FALSE);
+    ShowWindow(dlg, SW_SHOW);
+    UpdateWindow(dlg);
+    SetForegroundWindow(dlg);
+
+    MSG m{};
+    while (IsWindow(dlg)) {
+        BOOL code = GetMessageW(&m, nullptr, 0, 0);
+        if (code <= 0) {
+            if (code == 0) PostQuitMessage((int)m.wParam);
+            break;
+        }
+        if (!IsDialogMessageW(dlg, &m)) {
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+        }
+    }
+    if (owner) EnableWindow(owner, TRUE);
+    if (state.ok) {
+        outSize = state.size;
+        return true;
+    }
+    return false;
+}
 bool LoadBrandColors() { return LoadBoolSetting(L"BrandColors", false); }
 void SaveBrandColors(bool on) { SaveBoolSetting(L"BrandColors", on); }
 DWORD LoadPollSeconds() {
@@ -1029,7 +1195,41 @@ void ShowMenu() {
     CheckMenuRadioItem(m, ID_MODE_WIDGET, ID_MODE_TRAY, g_wantWidget ? ID_MODE_WIDGET : ID_MODE_TRAY, MF_BYCOMMAND);
     UINT bgFlags = MF_STRING | (g_widgetBackground ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED);
     AppendMenuW(m, bgFlags, ID_WIDGET_BACKGROUND, T(L"Background behind taskbar text (for transparent taskbars)"));
-    AppendMenuW(m, MF_STRING | (g_stacked ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_STACKED, T(L"Icons above percentages (narrower)"));
+
+    if (g_wantWidget) {
+        // Text Placement submenu
+        HMENU placeMenu = CreatePopupMenu();
+        widget::TextPlacement curPlace = widget::GetTextPlacement();
+        AppendMenuW(placeMenu, MF_STRING | (curPlace == widget::TextPlacement::Right ? MF_CHECKED : 0), ID_PLACE_RIGHT, L"Right of icon (Default)");
+        AppendMenuW(placeMenu, MF_STRING | (curPlace == widget::TextPlacement::Left ? MF_CHECKED : 0), ID_PLACE_LEFT, L"Left of icon");
+        AppendMenuW(placeMenu, MF_STRING | (curPlace == widget::TextPlacement::Below ? MF_CHECKED : 0), ID_PLACE_BELOW, L"Below icon");
+        AppendMenuW(m, MF_POPUP, (UINT_PTR)placeMenu, L"Text placement");
+
+        // Percentage Font Size submenu
+        HMENU sizeMenu = CreatePopupMenu();
+        int curSize = widget::GetPercentFontSize();
+        bool isPreset = false;
+        struct SizeOpt { int sz; const wchar_t* label; UINT id; };
+        SizeOpt opts[] = {
+            { 10, L"Small (10 px)", ID_FONT_SIZE_10 },
+            { 11, L"Compact (11 px)", ID_FONT_SIZE_11 },
+            { 13, L"Normal (13 px - Default)", ID_FONT_SIZE_13 },
+            { 15, L"Medium (15 px)", ID_FONT_SIZE_15 },
+            { 17, L"Large (17 px)", ID_FONT_SIZE_17 },
+            { 20, L"Extra Large (20 px)", ID_FONT_SIZE_20 },
+        };
+        for (const auto& opt : opts) {
+            bool checked = (curSize == opt.sz);
+            if (checked) isPreset = true;
+            AppendMenuW(sizeMenu, MF_STRING | (checked ? MF_CHECKED : 0), opt.id, opt.label);
+        }
+        AppendMenuW(sizeMenu, MF_SEPARATOR, 0, nullptr);
+        std::wstring customLabel = L"Custom size... (" + std::to_wstring(curSize) + L" px)";
+        AppendMenuW(sizeMenu, MF_STRING | (!isPreset ? MF_CHECKED : 0), ID_FONT_SIZE_CUSTOM, customLabel.c_str());
+        AppendMenuW(sizeMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(sizeMenu, MF_STRING | (curSize == 13 ? MF_CHECKED : 0), ID_FONT_SIZE_RESET, L"Reset to default (13 px)");
+        AppendMenuW(m, MF_POPUP, (UINT_PTR)sizeMenu, L"Percentage text size");
+    }
 
     // Taskbar Position submenu
     if (g_wantWidget) {
@@ -1164,6 +1364,24 @@ void ShowMenu() {
         }
         case ID_MODE_WIDGET: SetMode(true); break;
         case ID_MODE_TRAY: SetMode(false); break;
+        case ID_PLACE_RIGHT: ApplyTextPlacement(widget::TextPlacement::Right); break;
+        case ID_PLACE_LEFT:  ApplyTextPlacement(widget::TextPlacement::Left); break;
+        case ID_PLACE_BELOW: ApplyTextPlacement(widget::TextPlacement::Below); break;
+        case ID_FONT_SIZE_10: ApplyPercentFontSize(10); break;
+        case ID_FONT_SIZE_11: ApplyPercentFontSize(11); break;
+        case ID_FONT_SIZE_13: ApplyPercentFontSize(13); break;
+        case ID_FONT_SIZE_15: ApplyPercentFontSize(15); break;
+        case ID_FONT_SIZE_17: ApplyPercentFontSize(17); break;
+        case ID_FONT_SIZE_20: ApplyPercentFontSize(20); break;
+        case ID_FONT_SIZE_CUSTOM: {
+            int cur = widget::GetPercentFontSize();
+            int chosen = cur;
+            if (PromptFontSize(g_hwnd, cur, chosen)) {
+                ApplyPercentFontSize(chosen);
+            }
+            break;
+        }
+        case ID_FONT_SIZE_RESET: ApplyPercentFontSize(13); break;
         case ID_VERSION: {
             const wchar_t* versionInfo =
                 L"Peripheral Wireless Battery v1.0\n\n"
@@ -1524,7 +1742,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     g_brandColors = LoadBrandColors();
     g_stacked = LoadStacked();
     g_pollIntervalMs = LoadPollSeconds() * 1000;
-    widget::SetStacked(g_stacked);
+    int fontSize = LoadPercentFontSize();
+    widget::SetPercentFontSize(fontSize);
+    int placement = LoadTextPlacement();
+    widget::SetTextPlacement(static_cast<widget::TextPlacement>(placement));
     widget::SetBackground(g_widgetBackground);  // remembered by the widget across re-creation
     i18n::Init();
     g_widgetMonitor = LoadWidgetMonitor();

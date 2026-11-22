@@ -34,6 +34,16 @@ void SetLightTheme(bool light);
 void SetBackground(bool on);
 // Icon above the percentage instead of beside it, when the taskbar is tall enough (kept across Create/Destroy).
 void SetStacked(bool on);
+
+enum class TextPlacement : DWORD {
+    Right = 0,
+    Left = 1,
+    Below = 2
+};
+void SetTextPlacement(TextPlacement placement);
+TextPlacement GetTextPlacement();
+void SetPercentFontSize(int px);
+int GetPercentFontSize();
 // Which taskbars show the strip: L"all" (default), L"main", or the id of one other monitor from
 // OtherMonitors() (then only that monitor shows it). Kept across Create/Destroy.
 void SetMonitorChoice(const std::wstring& choice);

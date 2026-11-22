@@ -26,6 +26,8 @@ bool g_light, g_hover;
 bool g_background;  // opaque rounded plate behind the text, for transparent / restyled taskbars
 bool g_stacked;     // icon above the percentage (menu option, PR #525)
 bool g_vertical;    // the primary taskbar is docked left or right: one block per device, stacked (PR #321)
+int g_percentFontSize = 13;
+widget::TextPlacement g_placement = widget::TextPlacement::Right;
 std::vector<WidgetItem> g_items;
 std::wstring g_tipText;
 RECT g_lastTray{}, g_lastBar{}, g_lastWidgets{};
@@ -451,7 +453,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
     Rgb full = g_light ? Rgb{ 16, 124, 16 } : Rgb{ 108, 203, 95 };  // Windows "success" green
     HFONT icons = MakeFont(Px(16), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
     HFONT bolt = MakeFont(Px(11), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
-    HFONT text = MakeFont(Px(13), FW_NORMAL, L"Segoe UI Variable Text", L"Segoe UI", Px(12));
+    HFONT text = MakeFont(Px(g_percentFontSize), FW_NORMAL, L"Segoe UI Variable Text", L"Segoe UI", Px(std::max(8, g_percentFontSize - 1)));
     HFONT caption = MakeFont(std::max(8, Px(7)), FW_SEMIBOLD, L"Segoe UI Variable Text", L"Segoe UI");  // never under 8 px
 
     std::vector<Piece> out;
@@ -463,8 +465,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         int a = (it.dim && !it.charging) ? 120 : 255;
         Rgb tc = it.low ? red : fg;
         bool mark = it.charging || it.full;  // bolt while charging, green check mark once full
-        size_t glyph = out.size();
-        slots.push_back({ (int)glyph, (int)glyph + 1, mark ? (int)glyph + 2 : -1 });
+
         bool hasCustom = it.hasCustomColor;
         bool branded = (it.accent != Accent::None);
         BrandColor bc = hasCustom ? it.customColor : AccentColor(it.accent, g_light);
@@ -476,21 +477,57 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             icon.halo = Halo(icon.m, icon.haloR);
             icon.haloAlpha = g_light ? 60 : 140;
         }
-        out.push_back(std::move(icon));
+
         std::wstring t = !it.text.empty() ? it.text : it.percent >= 0 ? std::to_wstring(it.percent) + L"%" : L"?";
         Piece label{ RenderMask(t, text, g_light), tc, a, mark ? Px(2) : 0 };
         if (branded && !hasCustom && it.percent >= 0) {
             label.barPct = it.percent;
             label.barColor = it.low ? red : accent;
         }
-        out.push_back(std::move(label));
-        if (mark) out.push_back({ RenderMask(std::wstring(1, it.full ? kCheck : kBolt), bolt, g_light), it.full ? full : charge, a, 0 });
-        out.back().gapAfter = i + 1 < g_items.size() ? Px(14) : 0;
-        if (!it.label.empty()) {  // tiny caption in the bottom-right corner of the icon
+
+        int iconIdx = -1, labelIdx = -1, boltIdx = -1;
+
+        if (g_placement == widget::TextPlacement::Left) {
+            // Text on left of icon: [92%] [⚡] [Icon]
+            label.gapAfter = mark ? Px(2) : Px(5);
+            labelIdx = (int)out.size();
+            out.push_back(std::move(label));
+
+            if (mark) {
+                Piece boltPiece{ RenderMask(std::wstring(1, it.full ? kCheck : kBolt), bolt, g_light), it.full ? full : charge, a, Px(5) };
+                boltIdx = (int)out.size();
+                out.push_back(std::move(boltPiece));
+            }
+
+            icon.gapAfter = (i + 1 < g_items.size()) ? Px(14) : 0;
+            iconIdx = (int)out.size();
+            out.push_back(std::move(icon));
+        } else {
+            // Right of icon (Default) or Below (stacked): [Icon] [92%] [⚡]
+            icon.gapAfter = Px(5);
+            iconIdx = (int)out.size();
+            out.push_back(std::move(icon));
+
+            label.gapAfter = mark ? Px(2) : 0;
+            labelIdx = (int)out.size();
+            out.push_back(std::move(label));
+
+            if (mark) {
+                Piece boltPiece{ RenderMask(std::wstring(1, it.full ? kCheck : kBolt), bolt, g_light), it.full ? full : charge, a, 0 };
+                boltIdx = (int)out.size();
+                out.push_back(std::move(boltPiece));
+            }
+
+            out.back().gapAfter = (i + 1 < g_items.size()) ? Px(14) : 0;
+        }
+
+        slots.push_back({ iconIdx, labelIdx, boltIdx });
+
+        if (!it.label.empty() && iconIdx >= 0) {  // tiny caption in the bottom-right corner of the icon
             Piece c{ RenderMask(it.label, caption, g_light), fg, a, 0 };
-            c.anchor = (int)glyph;
-            c.bx = out[glyph].m.w - c.m.w + Px(3);
-            c.by = out[glyph].m.h - c.m.h + Px(3);
+            c.anchor = iconIdx;
+            c.bx = out[iconIdx].m.w - c.m.w + Px(3);
+            c.by = out[iconIdx].m.h - c.m.h + Px(3);
             out.push_back(c);
         }
     }
@@ -503,10 +540,10 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
     const int rowGap = Px(2), barRoom = Px(5);  // barRoom: space for a brand level bar under the text
     int iconH = 0, textH = 0;
     for (const Slot& s : slots) {
-        iconH = std::max(iconH, out[s.icon].m.h);
-        textH = std::max(textH, out[s.label].m.h);
+        if (s.icon >= 0 && s.icon < (int)out.size()) iconH = std::max(iconH, out[s.icon].m.h);
+        if (s.label >= 0 && s.label < (int)out.size()) textH = std::max(textH, out[s.label].m.h);
     }
-    bool stacked = !g_vertical && g_stacked && !slots.empty() && barH >= iconH + rowGap + textH + barRoom + Px(6);
+    bool stacked = !g_vertical && ((g_placement == widget::TextPlacement::Below) || g_stacked) && !slots.empty();
     if (g_vertical) {
         // One block per device, centred in the bar's width: icon, then the percentage (and bolt) under it.
         width = barW;
@@ -541,7 +578,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
     }
     if (stacked) {
         // Icon on top (bolt to its right), percentage centred under it; the pair centred in the bar's height.
-        int top = (barH - (iconH + rowGap + textH + barRoom)) / 2;
+        int totalH = iconH + rowGap + textH;
+        int top = std::max(0, (barH - totalH) / 2);
         int x = Px(8);
         for (const Slot& s : slots) {
             Piece& ic = out[s.icon];
@@ -1004,6 +1042,29 @@ void SetStacked(bool on) {
     g_stacked = on;
     PaintAll();
     if (g_wnd) Reposition();
+}
+
+void SetTextPlacement(TextPlacement placement) {
+    g_placement = placement;
+    g_stacked = (placement == TextPlacement::Below);
+    PaintAll();
+    if (g_wnd) Reposition();
+}
+
+TextPlacement GetTextPlacement() {
+    return g_placement;
+}
+
+void SetPercentFontSize(int px) {
+    if (px < 8) px = 8;
+    if (px > 36) px = 36;
+    g_percentFontSize = px;
+    PaintAll();
+    if (g_wnd) Reposition();
+}
+
+int GetPercentFontSize() {
+    return g_percentFontSize;
 }
 
 void SetMonitorChoice(const std::wstring& choice) {
